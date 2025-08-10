@@ -1,0 +1,78 @@
+version: '3.8'
+
+services:
+    api:
+        container_name: chat_bot__api
+        build:
+            context: .
+            dockerfile: docker/api/Dockerfile
+        restart: unless-stopped
+        depends_on:
+            - migrations
+        expose:
+            - 5000
+        command:
+            [
+                'poetry',
+                'run',
+                'uvicorn',
+                'app:create_app',
+                '--host',
+                '0.0.0.0',
+                '--port',
+                '5000',
+            ]
+
+    postgres:
+        build:
+            context: .
+            dockerfile: docker/postgresql/Dockerfile
+        restart: unless-stopped
+        container_name: chat_bot__postgres
+        env_file:
+            - .env
+        environment:
+            - PGDATA=/var/lib/postgresql/data/pgdata
+            - POSTGRES_PASSWORD=${POSTGRES__PASSWORD}
+            - POSTGRES_USER=${POSTGRES__USER}
+            - POSTGRES_DATABASES="test_${POSTGRES__DATABASE_NAME}","${POSTGRES__DATABASE_NAME}"
+        healthcheck:
+            test:
+                [
+                    'CMD-SHELL',
+                    'pg_isready -d ${POSTGRES__DATABASE_NAME} -U ${POSTGRES__USER}',
+                ]
+            interval: 5s
+            timeout: 10s
+            retries: 5
+        volumes:
+            - ${POSTGRES__DATA_VOLUME}:/var/lib/postgresql/data/pgdata
+
+    migrations:
+        container_name: chat_bot__migrations
+        build:
+            context: .
+            dockerfile: docker/migrations/Dockerfile
+        env_file:
+            - .env
+        depends_on:
+            postgres:
+                condition: service_healthy
+        command: ['poetry', 'run', 'python', '-m', 'scripts.migrate']
+
+    minio:
+        container_name: chat_bot__minio
+        image: docker.io/bitnami/minio:2022
+        ports:
+            - '9000:9000'
+        volumes:
+            - ${S3__DATA_VOLUME}:/minio_data
+        environment:
+            - MINIO_ROOT_USER=${S3__ROOT_USER}
+            - MINIO_ROOT_PASSWORD=${S3__ROOT_PASSWORD}
+            - MINIO_DEFAULT_BUCKETS=${S3__BUCKET_NAME}
+
+networks:
+    default:
+        name: shared-network
+        external: true
